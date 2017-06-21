@@ -1,6 +1,20 @@
+#[macro_use]
+extern crate nom;
+
 use std::io::prelude::*;
 use std::io;
 use std::process;
+
+use nom::*;
+
+
+named!(parse_command<&str, Command>,
+    do_parse!(
+        program: ws!(alpha) >>
+        args: many0!(ws!(is_not!(" "))) >>
+        (Command { program: program.to_string(), args: args.iter().map(|a| a.to_string()).collect() })
+    )
+);
 
 
 #[derive(Debug, PartialEq)]
@@ -13,8 +27,10 @@ struct Command {
 impl Command {
 
     fn new(command: &str) -> Option<Self> {
-        let mut tokens = command.trim().split_whitespace().map(|t| t.to_string());
-        tokens.next().map(|program| Command { program: program, args: tokens.collect() })
+        match parse_command(command) {
+            IResult::Done(_, cmd) => Some(cmd),
+            _ => None
+        }
     }
 
     fn run(&self) -> io::Result<()> {
@@ -50,8 +66,18 @@ fn main() {
 #[test]
 fn test_command_new() {
     assert_eq!(
+        Command::new("ls").unwrap(),
+        Command { program: "ls".to_string(), args: vec![] }
+    );
+
+    assert_eq!(
         Command::new("ls -la").unwrap(),
         Command { program: "ls".to_string(), args: vec!["-la".to_string()] }
+    );
+
+    assert_eq!(
+        Command::new("rm -rf dir").unwrap(),
+        Command { program: "rm".to_string(), args: vec!["-rf".to_string(), "dir".to_string()] }
     );
 }
 
