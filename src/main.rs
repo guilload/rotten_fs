@@ -8,11 +8,34 @@ use std::process;
 use nom::*;
 
 
+#[derive(Debug, PartialEq)]
+enum StdX {
+    Redirect(String),
+    StdErr,
+    StdIn,
+    StdOut,
+}
+
+named!(parse_redirect_to<&str, StdX>,
+    do_parse!(
+        tag!(">") >>
+        path: ws!(is_not!(" ")) >>
+
+        (StdX::Redirect(path.to_string()))
+    )
+);
+
 named!(parse_command<&str, Command>,
     do_parse!(
         program: ws!(alpha) >>
-        args: many0!(ws!(is_not!(" "))) >>
-        (Command { program: program.to_string(), args: args.iter().map(|a| a.to_string()).collect() })
+        args: many0!(ws!(is_not!(" >"))) >>
+        redirect_to: opt!(complete!(parse_redirect_to)) >>
+
+        (Command {
+            program: program.to_string(),
+            args: args.iter().map(|a| a.to_string()).collect(),
+            stdout: redirect_to.unwrap_or(StdX::StdOut),
+        })
     )
 );
 
@@ -21,6 +44,7 @@ named!(parse_command<&str, Command>,
 struct Command {
     program: String,
     args: Vec<String>,
+    stdout: StdX,
 }
 
 
@@ -66,19 +90,38 @@ fn main() {
 #[test]
 fn test_command_new() {
     assert_eq!(
-        Command::new("ls").unwrap(),
-        Command { program: "ls".to_string(), args: vec![] }
+        Command::new("ls"),
+        Some(Command {
+            program: "ls".to_string(),
+            args: vec![],
+            stdout: StdX::StdOut,
+        })
     );
 
     assert_eq!(
-        Command::new("ls -la").unwrap(),
-        Command { program: "ls".to_string(), args: vec!["-la".to_string()] }
+        Command::new("ls -la"),
+        Some(Command {
+            program: "ls".to_string(),
+            args: vec!["-la".to_string()],
+            stdout: StdX::StdOut,
+        })
     );
 
     assert_eq!(
-        Command::new("rm -rf dir").unwrap(),
-        Command { program: "rm".to_string(), args: vec!["-rf".to_string(), "dir".to_string()] }
+        Command::new("rm -rf dir"),
+        Some(Command {
+            program: "rm".to_string(),
+            args: vec!["-rf".to_string(), "dir".to_string()],
+            stdout: StdX::StdOut,
+        })
+    );
+
+    assert_eq!(
+        Command::new("ls -la > foo.txt"),
+        Some(Command {
+            program: "ls".to_string(),
+            args: vec!["-la".to_string()],
+            stdout: StdX::Redirect("foo.txt".to_string()),
+        })
     );
 }
-
-
