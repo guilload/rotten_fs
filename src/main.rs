@@ -1,8 +1,10 @@
 #[macro_use]
 extern crate nom;
 
+use std::fs::File;
 use std::io::prelude::*;
 use std::io;
+use std::os::unix::io::{IntoRawFd, FromRawFd};
 use std::process;
 
 use nom::*;
@@ -51,7 +53,7 @@ struct Command {
 impl Command {
 
     fn new(command: &str) -> Option<Self> {
-        match parse_command(command) {
+        match parse_command(command.trim()) {
             IResult::Done(_, cmd) => Some(cmd),
             _ => None
         }
@@ -60,10 +62,33 @@ impl Command {
     fn run(&self) -> io::Result<()> {
         process::Command::new(&self.program)
             .args(&self.args)
+            .stdout(self.stdout()?)
             .spawn()?
             .wait()?;
 
         Ok(())
+    }
+
+    fn stdout(&self) -> io::Result<process::Stdio> {
+        let stdio = match &self.stdout {
+            &StdX::Redirect(ref path) => File::create(path)?.into_stdio(),
+            _ => process::Stdio::inherit(),
+        };
+        Ok(stdio)
+    }
+
+}
+
+trait IntoStdio {
+
+    fn into_stdio(self) -> process::Stdio;
+}
+
+impl IntoStdio for File {
+
+    fn into_stdio(self) -> process::Stdio {
+        let fd = self.into_raw_fd();
+        unsafe { process::Stdio::from_raw_fd(fd) }
     }
 
 }
