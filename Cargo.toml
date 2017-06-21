@@ -1,0 +1,6 @@
+[package]
+name = "rotten_sh"
+version = "0.1.0"
+authors = ["Adrien Guillo"]
+
+[dependencies]
