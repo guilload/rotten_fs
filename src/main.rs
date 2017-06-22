@@ -74,11 +74,20 @@ impl Command {
     fn run(&self) -> io::Result<()> {
         process::Command::new(&self.program)
             .args(&self.args)
+            .stdin(self.stdin()?)
             .stdout(self.stdout()?)
             .spawn()?
             .wait()?;
 
         Ok(())
+    }
+
+    fn stdin(&self) -> io::Result<process::Stdio> {
+        let stdio = match &self.stdin {
+            &StdX::Redirect(ref path) => File::open(path)?.into_stdio(),
+            _ => process::Stdio::inherit(),
+        };
+        Ok(stdio)
     }
 
     fn stdout(&self) -> io::Result<process::Stdio> {
