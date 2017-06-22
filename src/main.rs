@@ -27,15 +27,26 @@ named!(parse_redirect_to<&str, StdX>,
     )
 );
 
+named!(parse_redirect_from<&str, StdX>,
+    do_parse!(
+        tag!("<") >>
+        path: ws!(is_not!(" >")) >>
+
+        (StdX::Redirect(path.to_string()))
+    )
+);
+
 named!(parse_command<&str, Command>,
     do_parse!(
         program: ws!(alpha) >>
-        args: many0!(ws!(is_not!(" >"))) >>
+        args: many0!(ws!(is_not!(" <>"))) >>
+        redirect_from: opt!(complete!(parse_redirect_from)) >>
         redirect_to: opt!(complete!(parse_redirect_to)) >>
 
         (Command {
             program: program.to_string(),
             args: args.iter().map(|a| a.to_string()).collect(),
+            stdin: redirect_from.unwrap_or(StdX::StdIn),
             stdout: redirect_to.unwrap_or(StdX::StdOut),
         })
     )
@@ -46,6 +57,7 @@ named!(parse_command<&str, Command>,
 struct Command {
     program: String,
     args: Vec<String>,
+    stdin: StdX,
     stdout: StdX,
 }
 
@@ -119,6 +131,7 @@ fn test_command_new() {
         Some(Command {
             program: "ls".to_string(),
             args: vec![],
+            stdin: StdX::StdIn,
             stdout: StdX::StdOut,
         })
     );
@@ -128,6 +141,7 @@ fn test_command_new() {
         Some(Command {
             program: "ls".to_string(),
             args: vec!["-la".to_string()],
+            stdin: StdX::StdIn,
             stdout: StdX::StdOut,
         })
     );
@@ -137,16 +151,38 @@ fn test_command_new() {
         Some(Command {
             program: "rm".to_string(),
             args: vec!["-rf".to_string(), "dir".to_string()],
+            stdin: StdX::StdIn,
             stdout: StdX::StdOut,
         })
     );
 
     assert_eq!(
-        Command::new("ls -la > foo.txt"),
+        Command::new("ls -la > output.txt"),
         Some(Command {
             program: "ls".to_string(),
             args: vec!["-la".to_string()],
-            stdout: StdX::Redirect("foo.txt".to_string()),
+            stdin: StdX::StdIn,
+            stdout: StdX::Redirect("output.txt".to_string()),
+        })
+    );
+
+    assert_eq!(
+        Command::new("sort -r < input.txt"),
+        Some(Command {
+            program: "sort".to_string(),
+            args: vec!["-r".to_string()],
+            stdin: StdX::Redirect("input.txt".to_string()),
+            stdout: StdX::StdOut,
+        })
+    );
+
+    assert_eq!(
+        Command::new("sort -r < input.txt > output.txt"),
+        Some(Command {
+            program: "sort".to_string(),
+            args: vec!["-r".to_string()],
+            stdin: StdX::Redirect("input.txt".to_string()),
+            stdout: StdX::Redirect("output.txt".to_string()),
         })
     );
 }
