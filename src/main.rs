@@ -21,7 +21,7 @@ enum StdX {
 named!(parse_redirect_to<&str, StdX>,
     do_parse!(
         tag!(">") >>
-        path: ws!(is_not!(" ")) >>
+        path: ws!(is_not!(" |")) >>
 
         (StdX::Redirect(path.to_string()))
     )
@@ -30,7 +30,7 @@ named!(parse_redirect_to<&str, StdX>,
 named!(parse_redirect_from<&str, StdX>,
     do_parse!(
         tag!("<") >>
-        path: ws!(is_not!(" >")) >>
+        path: ws!(is_not!(" >|")) >>
 
         (StdX::Redirect(path.to_string()))
     )
@@ -39,7 +39,7 @@ named!(parse_redirect_from<&str, StdX>,
 named!(parse_command<&str, Command>,
     do_parse!(
         program: ws!(alpha) >>
-        args: many0!(ws!(is_not!(" <>"))) >>
+        args: many0!(ws!(is_not!(" <>|"))) >>
         redirect_from: opt!(complete!(parse_redirect_from)) >>
         redirect_to: opt!(complete!(parse_redirect_to)) >>
 
@@ -52,8 +52,45 @@ named!(parse_command<&str, Command>,
     )
 );
 
+named!(parse_pipeline<&str, Pipeline>,
+    do_parse!(
+        init: parse_command >>
+        commands:
+            fold_many0!(
+                do_parse!(
+                    tag!("|") >>
+                    command: ws!(parse_command) >>
+                    (command)
+                ),
+                vec![init],
+                |mut acc: Vec<Command>, cmd| { acc.push(cmd); acc }
+            ) >>
+
+        (Pipeline { commands: commands } )
+    )
+);
 
 #[derive(Debug, PartialEq)]
+struct Pipeline {
+    commands: Vec<Command>,
+}
+
+impl Pipeline {
+
+    fn parse(pipeline: &str) -> Option<Self> {
+        match parse_pipeline(pipeline.trim()) {
+            IResult::Done(_, ppln) => Some(ppln),
+            _ => None
+        }
+    }
+
+    fn run(&self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+
+#[derive(Debug, Clone, PartialEq)]
 struct Command {
     program: String,
     args: Vec<String>,
@@ -201,6 +238,28 @@ fn test_command_new() {
                 args: vec!["-r".to_string()],
                 stdin: StdX::Redirect("input.txt".to_string()),
                 stdout: StdX::Redirect("output.txt".to_string()),
+            }
+        )
+    );
+}
+
+
+#[test]
+fn test_pipeline_new() {
+    assert_eq!(
+        Pipeline::parse("ls"),
+        Some(
+            Pipeline {
+                commands: vec![Command::new("ls")]
+            }
+        )
+    );
+
+    assert_eq!(
+        Pipeline::parse("ls | wc"),
+        Some(
+            Pipeline {
+                commands: vec![Command::new("ls"), Command::new("wc")]
             }
         )
     );
