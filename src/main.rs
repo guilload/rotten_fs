@@ -120,6 +120,22 @@ impl Command {
         self
     }
 
+    fn stdin(&mut self, stdx: StdX) -> &mut Self {
+        match stdx {
+            StdX::StdErr | StdX::StdOut => panic!(),
+            _ => self.stdin = stdx,
+        }
+        self
+    }
+
+    fn stdout(&mut self, stdx: StdX) -> &mut Self {
+        match stdx {
+            StdX::StdErr | StdX::StdIn => panic!(),
+            _ => self.stdout = stdx,
+        }
+        self
+    }
+
     fn parse(command: &str) -> Option<Self> {
         match parse_command(command.trim()) {
             IResult::Done(_, cmd) => Some(cmd),
@@ -130,15 +146,15 @@ impl Command {
     fn run(&self) -> io::Result<()> {
         process::Command::new(&self.program)
             .args(&self.args)
-            .stdin(self.stdin()?)
-            .stdout(self.stdout()?)
+            .stdin(self.fdin()?)
+            .stdout(self.fdout()?)
             .spawn()?
             .wait()?;
 
         Ok(())
     }
 
-    fn stdin(&self) -> io::Result<process::Stdio> {
+    fn fdin(&self) -> io::Result<process::Stdio> {
         let stdio = match &self.stdin {
             &StdX::Redirect(ref path) => File::open(path)?.into_stdio(),
             _ => process::Stdio::inherit(),
@@ -146,7 +162,7 @@ impl Command {
         Ok(stdio)
     }
 
-    fn stdout(&self) -> io::Result<process::Stdio> {
+    fn fdout(&self) -> io::Result<process::Stdio> {
         let stdio = match &self.stdout {
             &StdX::Redirect(ref path) => File::create(path)?.into_stdio(),
             _ => process::Stdio::inherit(),
@@ -208,38 +224,24 @@ fn test_command_new() {
 
     assert_eq!(
         Command::parse("ls -la > output.txt"),
-        Some(
-            Command {
-                program: "ls".to_string(),
-                args: vec!["-la".to_string()],
-                stdin: StdX::StdIn,
-                stdout: StdX::Redirect("output.txt".to_string()),
-            }
-        )
+        Some(Command::new("ls")
+                .arg("-la")
+                .stdout(StdX::Redirect("output.txt".to_string())).to_owned())
     );
 
     assert_eq!(
         Command::parse("sort -r < input.txt"),
-        Some(
-            Command {
-                program: "sort".to_string(),
-                args: vec!["-r".to_string()],
-                stdin: StdX::Redirect("input.txt".to_string()),
-                stdout: StdX::StdOut,
-            }
-        )
+        Some(Command::new("sort")
+                .arg("-r")
+                .stdin(StdX::Redirect("input.txt".to_string())).to_owned())
     );
 
     assert_eq!(
         Command::parse("sort -r < input.txt > output.txt"),
-        Some(
-            Command {
-                program: "sort".to_string(),
-                args: vec!["-r".to_string()],
-                stdin: StdX::Redirect("input.txt".to_string()),
-                stdout: StdX::Redirect("output.txt".to_string()),
-            }
-        )
+        Some(Command::new("sort")
+                .arg("-r")
+                .stdin(StdX::Redirect("input.txt".to_string()))
+                .stdout(StdX::Redirect("output.txt".to_string())).to_owned())
     );
 }
 
