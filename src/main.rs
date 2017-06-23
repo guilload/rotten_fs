@@ -10,7 +10,7 @@ use std::process;
 use nom::*;
 
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 enum StdX {
     Redirect(String),
     StdErr,
@@ -64,7 +64,26 @@ struct Command {
 
 impl Command {
 
-    fn new(command: &str) -> Option<Self> {
+    fn new(program: &str) -> Self {
+        Command {
+            program: program.to_string(),
+            args: vec![],
+            stdin: StdX::StdIn,
+            stdout: StdX::StdOut,
+        }
+    }
+
+    fn arg(&mut self, a: &str) -> &mut Self {
+        self.args.push(a.to_string());
+        self
+    }
+
+    fn args(&mut self, v: Vec<&str>) -> &mut Self {
+        self.args.extend(v.iter().map(|a| a.to_string()));
+        self
+    }
+
+    fn parse(command: &str) -> Option<Self> {
         match parse_command(command.trim()) {
             IResult::Done(_, cmd) => Some(cmd),
             _ => None
@@ -136,62 +155,53 @@ fn main() {
 #[test]
 fn test_command_new() {
     assert_eq!(
-        Command::new("ls"),
-        Some(Command {
-            program: "ls".to_string(),
-            args: vec![],
-            stdin: StdX::StdIn,
-            stdout: StdX::StdOut,
-        })
+        Command::parse("ls"),
+        Some(Command::new("ls"))
     );
 
     assert_eq!(
-        Command::new("ls -la"),
-        Some(Command {
-            program: "ls".to_string(),
-            args: vec!["-la".to_string()],
-            stdin: StdX::StdIn,
-            stdout: StdX::StdOut,
-        })
+        Command::parse("ls -la"),
+        Some(Command::new("ls").arg("-la").to_owned())
     );
 
     assert_eq!(
-        Command::new("rm -rf dir"),
-        Some(Command {
-            program: "rm".to_string(),
-            args: vec!["-rf".to_string(), "dir".to_string()],
-            stdin: StdX::StdIn,
-            stdout: StdX::StdOut,
-        })
+        Command::parse("rm -rf dir"),
+        Some(Command::new("rm").args(vec!["-rf", "dir"]).to_owned())
     );
 
     assert_eq!(
-        Command::new("ls -la > output.txt"),
-        Some(Command {
-            program: "ls".to_string(),
-            args: vec!["-la".to_string()],
-            stdin: StdX::StdIn,
-            stdout: StdX::Redirect("output.txt".to_string()),
-        })
+        Command::parse("ls -la > output.txt"),
+        Some(
+            Command {
+                program: "ls".to_string(),
+                args: vec!["-la".to_string()],
+                stdin: StdX::StdIn,
+                stdout: StdX::Redirect("output.txt".to_string()),
+            }
+        )
     );
 
     assert_eq!(
-        Command::new("sort -r < input.txt"),
-        Some(Command {
-            program: "sort".to_string(),
-            args: vec!["-r".to_string()],
-            stdin: StdX::Redirect("input.txt".to_string()),
-            stdout: StdX::StdOut,
-        })
+        Command::parse("sort -r < input.txt"),
+        Some(
+            Command {
+                program: "sort".to_string(),
+                args: vec!["-r".to_string()],
+                stdin: StdX::Redirect("input.txt".to_string()),
+                stdout: StdX::StdOut,
+            }
+        )
     );
 
     assert_eq!(
-        Command::new("sort -r < input.txt > output.txt"),
-        Some(Command {
-            program: "sort".to_string(),
-            args: vec!["-r".to_string()],
-            stdin: StdX::Redirect("input.txt".to_string()),
-            stdout: StdX::Redirect("output.txt".to_string()),
-        })
+        Command::parse("sort -r < input.txt > output.txt"),
+        Some(
+            Command {
+                program: "sort".to_string(),
+                args: vec!["-r".to_string()],
+                stdin: StdX::Redirect("input.txt".to_string()),
+                stdout: StdX::Redirect("output.txt".to_string()),
+            }
+        )
     );
 }
