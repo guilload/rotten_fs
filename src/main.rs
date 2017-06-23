@@ -1,13 +1,49 @@
-#[macro_use]
+#![feature(libc)]
+extern crate libc;
+
+extern crate nix;
 extern crate nom;
 
+use std::ffi::CString;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io;
-use std::os::unix::io::{IntoRawFd, FromRawFd};
-use std::process;
+use std::os::unix::io::{IntoRawFd, RawFd};
 
+use nix::sys::wait::waitpid;
+use nix::unistd::{close, dup2, execvp, fork, ForkResult};
 use nom::*;
+
+
+fn run(cmd: &Command) -> io::Result<libc::pid_t> {
+    match fork() {
+
+        Ok(ForkResult::Child) => {
+            let mut args = vec![CString::new(cmd.program.as_bytes())?];
+            args.extend(cmd.args.iter().flat_map(|a| CString::new(a.as_bytes())));
+
+            if cmd.stdin != StdX::StdIn {
+                let fd = cmd.fdin()?;
+                dup2(fd, libc::STDIN_FILENO)?;
+                close(fd)?;
+            }
+
+            if cmd.stdout != StdX::StdOut {
+                let fd = cmd.fdout()?;
+                dup2(fd, libc::STDOUT_FILENO)?;
+                close(fd)?;
+            }
+
+            execvp(&args[0], &args)?;
+
+            Ok((0))
+        },
+
+        Ok(ForkResult::Parent { child }) => Ok((child)),
+
+        Err(e) => panic!("{:?}", e), //FIXME
+    }
+}
 
 
 #[derive(Debug, Clone, PartialEq)]
@@ -143,45 +179,20 @@ impl Command {
         }
     }
 
-    fn run(&self) -> io::Result<()> {
-        process::Command::new(&self.program)
-            .args(&self.args)
-            .stdin(self.fdin()?)
-            .stdout(self.fdout()?)
-            .spawn()?
-            .wait()?;
-
-        Ok(())
-    }
-
-    fn fdin(&self) -> io::Result<process::Stdio> {
-        let stdio = match &self.stdin {
-            &StdX::Redirect(ref path) => File::open(path)?.into_stdio(),
-            _ => process::Stdio::inherit(),
+    fn fdin(&self) -> io::Result<RawFd> {
+        let fd = match self.stdin {
+            StdX::Redirect(ref path) => File::open(path)?.into_raw_fd(),
+            _ => libc::STDIN_FILENO,
         };
-        Ok(stdio)
+        Ok(fd)
     }
 
-    fn fdout(&self) -> io::Result<process::Stdio> {
-        let stdio = match &self.stdout {
-            &StdX::Redirect(ref path) => File::create(path)?.into_stdio(),
-            _ => process::Stdio::inherit(),
+    fn fdout(&self) -> io::Result<RawFd> {
+        let fd = match self.stdout {
+            StdX::Redirect(ref path) => File::create(path)?.into_raw_fd(),
+            _ => libc::STDOUT_FILENO,
         };
-        Ok(stdio)
-    }
-
-}
-
-trait IntoStdio {
-
-    fn into_stdio(self) -> process::Stdio;
-}
-
-impl IntoStdio for File {
-
-    fn into_stdio(self) -> process::Stdio {
-        let fd = self.into_raw_fd();
-        unsafe { process::Stdio::from_raw_fd(fd) }
+        Ok(fd)
     }
 
 }
@@ -196,10 +207,14 @@ fn main() {
         let mut buffer = String::new();
         io::stdin().read_line(&mut buffer);
 
-        if let Some(cmd) = Command::new(&buffer) {
-            if let Err(e) = cmd.run() {
-                println!("Command failed: {:?}", e);
-            }
+        if let Some(cmd) = Command::parse(&buffer) {
+            match run(&cmd) {
+                Ok(pid) => waitpid(pid, None),
+                Err(e) => {
+                    println!("Command failed: {:?}", e);
+                    continue;
+                },
+            };
         }
     }
 }

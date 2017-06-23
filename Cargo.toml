@@ -5,3 +5,4 @@ authors = ["Adrien Guillo"]
 
 [dependencies]
 nom = "^3.1"
+nix = "^0.8.1"
