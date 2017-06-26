@@ -11,43 +11,18 @@ use std::io;
 use std::os::unix::io::{IntoRawFd, RawFd};
 
 use nix::sys::wait::waitpid;
-use nix::unistd::{close, dup2, execvp, fork, ForkResult};
+use nix::unistd::{close, dup2, execvp, fork, ForkResult, pipe};
 use nom::*;
 
 
-fn run(cmd: &Command) -> io::Result<libc::pid_t> {
-    match fork() {
-
-        Ok(ForkResult::Child) => {
-            let mut args = vec![CString::new(cmd.program.as_bytes())?];
-            args.extend(cmd.args.iter().flat_map(|a| CString::new(a.as_bytes())));
-
-            if cmd.stdin != StdX::StdIn {
-                let fd = cmd.fdin()?;
-                dup2(fd, libc::STDIN_FILENO)?;
-                close(fd)?;
-            }
-
-            if cmd.stdout != StdX::StdOut {
-                let fd = cmd.fdout()?;
-                dup2(fd, libc::STDOUT_FILENO)?;
-                close(fd)?;
-            }
-
-            execvp(&args[0], &args)?;
-
-            Ok((0))
-        },
-
-        Ok(ForkResult::Parent { child }) => Ok((child)),
-
-        Err(e) => panic!("{:?}", e), //FIXME
-    }
+fn dupclose(from: RawFd, to: RawFd) -> Result<(), nix::Error> {
+    dup2(from, to)?;
+    close(from)
 }
-
 
 #[derive(Debug, Clone, PartialEq)]
 enum StdX {
+    Pipe(RawFd),
     Redirect(String),
     StdErr,
     StdIn,
@@ -120,9 +95,38 @@ impl Pipeline {
         }
     }
 
-    fn run(&self) -> io::Result<()> {
-        Ok(())
+    fn spawn(&mut self) -> io::Result<Vec<libc::pid_t>> {
+        let mut pastfdin: Option<RawFd> = None;
+        let mut pids = vec![];
+
+        for i in 0..(self.commands.len() - 1) {
+            let (fdin, fdout) = pipe()?;
+
+            self.commands[i].stdout(StdX::Pipe(fdout));
+            self.commands[i + 1].stdin(StdX::Pipe(fdin));
+
+            let pid = self.commands[i].spawn()?;
+            pids.push(pid);
+
+            match pastfdin { // closing fdin from past iteration
+                Some(fd) => close(fd)?,
+                _ => (),
+            }
+
+            pastfdin = Some(fdin);
+            close(fdout);
+        }
+
+        pids.push(self.commands.last().unwrap().spawn()?);
+
+        match pastfdin { // and here again...
+                Some(fd) => close(fd)?,
+                _ => (),
+            }
+
+        Ok(pids)
     }
+
 }
 
 
@@ -172,6 +176,14 @@ impl Command {
         self
     }
 
+    fn cprogram(&self) -> Result<CString, std::ffi::NulError> {
+        CString::new(self.program.as_bytes())
+    }
+
+    fn cargs(&self) -> Result<Vec<CString>, std::ffi::NulError> {
+        self.args.iter().map(|a| CString::new(a.as_bytes())).collect()
+    }
+
     fn parse(command: &str) -> Option<Self> {
         match parse_command(command.trim()) {
             IResult::Done(_, cmd) => Some(cmd),
@@ -179,23 +191,37 @@ impl Command {
         }
     }
 
-    fn fdin(&self) -> io::Result<RawFd> {
-        let fd = match self.stdin {
-            StdX::Redirect(ref path) => File::open(path)?.into_raw_fd(),
-            _ => libc::STDIN_FILENO,
-        };
-        Ok(fd)
-    }
+    fn spawn(&self) -> io::Result<libc::pid_t> {
+        match fork()? {
 
-    fn fdout(&self) -> io::Result<RawFd> {
-        let fd = match self.stdout {
-            StdX::Redirect(ref path) => File::create(path)?.into_raw_fd(),
-            _ => libc::STDOUT_FILENO,
-        };
-        Ok(fd)
+            ForkResult::Child => {
+
+                match self.stdin {
+                    StdX::Pipe(ref fd) => dupclose(*fd, libc::STDIN_FILENO)?,
+                    StdX::Redirect(ref path) => dupclose(File::open(path)?.into_raw_fd(), libc::STDIN_FILENO)?,
+                    _ => (),
+                }
+
+                match self.stdout {
+                    StdX::Pipe(ref fd) => dupclose(*fd, libc::STDOUT_FILENO)?,
+                    StdX::Redirect(ref path) => dupclose(File::create(path)?.into_raw_fd(), libc::STDOUT_FILENO)?,
+                    _ => (),
+                }
+
+                let mut args = vec![self.cprogram()?];
+                args.extend(self.cargs()?);
+
+                execvp(&args[0], &args)?;
+
+                Ok(0)
+            },
+
+            ForkResult::Parent { child } => Ok(child),
+        }
     }
 
 }
+
 
 fn main() {
     println!("Rotten sh...");
@@ -207,13 +233,13 @@ fn main() {
         let mut buffer = String::new();
         io::stdin().read_line(&mut buffer);
 
-        if let Some(cmd) = Command::parse(&buffer) {
-            match run(&cmd) {
-                Ok(pid) => waitpid(pid, None),
-                Err(e) => {
+        if let Some(mut pipeline) = Pipeline::parse(&buffer) {
+            let pids = pipeline.spawn();
+
+            while waitpid(-1, None).is_ok() {}
+
+            if let Err(e) = pids {
                     println!("Command failed: {:?}", e);
-                    continue;
-                },
             };
         }
     }
