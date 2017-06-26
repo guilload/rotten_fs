@@ -50,7 +50,7 @@ named!(parse_redirect_from<&str, StdX>,
 named!(parse_command<&str, Command>,
     do_parse!(
         program: ws!(alpha) >>
-        args: many0!(ws!(is_not!(" <>|"))) >>
+        args: many0!(ws!(is_not!(" &<>|"))) >>
         redirect_from: opt!(complete!(parse_redirect_from)) >>
         redirect_to: opt!(complete!(parse_redirect_to)) >>
 
@@ -76,14 +76,16 @@ named!(parse_pipeline<&str, Pipeline>,
                 vec![init],
                 |mut acc: Vec<Command>, cmd| { acc.push(cmd); acc }
             ) >>
+        background: opt!(complete!(tag!("&"))) >>
 
-        (Pipeline { commands: commands } )
+        (Pipeline { commands: commands, background: background.is_some() } )
     )
 );
 
 #[derive(Debug, PartialEq)]
 struct Pipeline {
     commands: Vec<Command>,
+    background: bool,
 }
 
 impl Pipeline {
@@ -290,19 +292,21 @@ fn test_command_new() {
 #[test]
 fn test_pipeline_new() {
     assert_eq!(
-        Pipeline::parse("ls"),
+        Pipeline::parse("ls &"),
         Some(
             Pipeline {
-                commands: vec![Command::new("ls")]
+                commands: vec![Command::new("ls")],
+                background: true,
             }
         )
     );
 
     assert_eq!(
-        Pipeline::parse("ls | wc"),
+        Pipeline::parse("ls | wc &"),
         Some(
             Pipeline {
-                commands: vec![Command::new("ls"), Command::new("wc")]
+                commands: vec![Command::new("ls"), Command::new("wc")],
+                background: true,
             }
         )
     );
