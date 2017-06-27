@@ -37,6 +37,10 @@ impl Shell {
             let mut buffer = String::new();
             io::stdin().read_line(&mut buffer);
 
+            if buffer.trim() == "exit" {
+                break;
+            }
+
             if let Some(mut pipeline) = Pipeline::parse(&buffer) { // FIXME: Pipeline.run()?
                 pipeline.spawn();
                 if pipeline.background {
