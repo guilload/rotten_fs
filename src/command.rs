@@ -1,7 +1,7 @@
 extern crate libc;
 
-extern crate nom;
 extern crate nix;
+extern crate nom;
 
 use std::ffi::CString;
 use std::ffi;
@@ -48,7 +48,7 @@ named!(pub parse_command<&str, Command>,
             stdin: redirect_from.unwrap_or(StdX::StdIn),
             stdout: redirect_to.unwrap_or(StdX::StdOut),
             pid: 0,
-            status: Status::Suspended,
+            status: Status::Running,
         })
     )
 );
@@ -66,8 +66,10 @@ pub struct Command {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Status {
-    Suspended,
     Completed,
+    Running,
+    Suspended,
+    Terminated,
 }
 
 
@@ -80,7 +82,7 @@ impl Command {
             stdin: StdX::StdIn,
             stdout: StdX::StdOut,
             pid: 0,
-            status: Status::Suspended,
+            status: Status::Running,
         }
     }
 
@@ -126,6 +128,10 @@ impl Command {
 
     pub fn is_suspended(&self) -> bool {
         self.status == Status::Suspended
+    }
+
+    pub fn is_terminated(&self) -> bool {
+        self.status == Status::Terminated
     }
 
     fn cprogram(&self) -> Result<CString, ffi::NulError> {
@@ -233,6 +239,6 @@ fn test_command_new() {
 
 #[test]
 fn test_status() {
-    assert!(Command::new("ls").is_suspended());
+    assert!(!Command::new("ls").is_completed());
     assert!(Command::new("ls").status(Status::Completed).is_completed());
 }

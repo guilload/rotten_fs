@@ -6,6 +6,7 @@ extern crate nom;
 use std::io;
 use std::os::unix::io::RawFd;
 
+use self::nix::sys::signal::Signal::{SIGINT, SIGTSTP};
 use self::nix::sys::wait::{waitpid, WaitStatus, WUNTRACED};
 use self::nix::unistd::{close, getpid, pipe, tcsetpgrp};
 use self::nom::*;
@@ -64,16 +65,21 @@ impl Pipeline {
     }
 
     pub fn is_suspended(&self) -> bool {
-        self.commands.iter().all(|c| c.is_suspended())
+        self.commands.iter().any(|c| c.is_suspended())
+    }
+
+    pub fn is_terminated(&self) -> bool {
+        self.commands.iter().any(|c| c.is_terminated())
     }
 
     pub fn wait(&mut self) -> Result<(), nix::Error> {
-        while !self.is_completed() {
+        while !self.is_completed() && !self.is_suspended() && !self.is_terminated() {
             let status = waitpid(-1 * self.pgid, Some(WUNTRACED))?;
 
             match status {
                 WaitStatus::Exited(pid, _) => self.find_command(pid).unwrap().status(Status::Completed),
-                WaitStatus::Stopped(pid, _) => self.find_command(pid).unwrap().status(Status::Suspended),
+                WaitStatus::Signaled(pid, SIGINT, _) => self.find_command(pid).unwrap().status(Status::Terminated),
+                WaitStatus::Stopped(pid, SIGTSTP) => self.find_command(pid).unwrap().status(Status::Suspended),
                 _ => panic!("unimplemented!"),
             };
         }

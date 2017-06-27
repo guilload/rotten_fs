@@ -16,6 +16,7 @@ use rotten_sh::signal::Signal;
 
 struct Shell {
     background_jobs: Vec<Pipeline>,
+    suspended_jobs: Vec<Pipeline>,
 }
 
 impl Shell {
@@ -26,7 +27,7 @@ impl Shell {
         setpgid(0, 0).unwrap();
         tcsetpgrp(libc::STDIN_FILENO, getpid()).unwrap();
 
-        Shell { background_jobs: vec![], }
+        Shell { background_jobs: vec![], suspended_jobs: vec![] }
     }
 
     fn run(&mut self) {
@@ -63,6 +64,9 @@ impl Shell {
                 }
                 else {
                     job.fg().unwrap();
+                    if job.is_suspended() {
+                        self.suspended_jobs.push(job);
+                    }
                 }
             }
         }
