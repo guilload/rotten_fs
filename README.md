@@ -6,5 +6,5 @@ A toy shell written in Rust
 ## Features
 
 - [x] input/output redirection
-- [ ] piping
+- [x] piping
 - [ ] job control
