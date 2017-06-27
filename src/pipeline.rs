@@ -55,17 +55,25 @@ impl Pipeline {
         Ok(())
     }
 
+    pub fn find_command(&mut self, pid: libc::pid_t) -> Option<&mut Command> {
+        self.commands.iter_mut().find(|c| c.pid == pid)
+    }
+
     pub fn is_completed(&self) -> bool {
         self.commands.iter().all(|c| c.is_completed())
     }
 
+    pub fn is_suspended(&self) -> bool {
+        self.commands.iter().all(|c| c.is_suspended())
+    }
+
     pub fn wait(&mut self) -> Result<(), nix::Error> {
-        while !self.is_completed() { // FIXME
+        while !self.is_completed() {
             let status = waitpid(-1 * self.pgid, Some(WUNTRACED))?;
 
             match status {
-                WaitStatus::Exited(pid, _) => self.commands.iter_mut().find(|c| c.pid == pid).unwrap().status(Status::Completed),  // FIXME
-                WaitStatus::Stopped(pid, _) => self.commands.iter_mut().find(|c| c.pid == pid).unwrap().status(Status::Suspended),
+                WaitStatus::Exited(pid, _) => self.find_command(pid).unwrap().status(Status::Completed),
+                WaitStatus::Stopped(pid, _) => self.find_command(pid).unwrap().status(Status::Suspended),
                 _ => panic!("unimplemented!"),
             };
         }
