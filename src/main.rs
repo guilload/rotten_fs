@@ -8,46 +8,61 @@ extern crate rotten_sh;
 use std::io::prelude::*;
 use std::io;
 
-use nix::unistd::{getpid, getpgid, tcgetpgrp, tcsetpgrp, setpgid};
+use nix::unistd::{getpid, setpgid, tcsetpgrp};
 
 use rotten_sh::pipeline::Pipeline;
 use rotten_sh::signal::Signal;
 
 
-struct Shell {}
+struct Shell {
+    background_jobs: Vec<Pipeline>,
+}
 
 impl Shell {
 
-    fn init() {
+    fn new() -> Self {
         Signal::ignore();
-        setpgid(0, 0);
-        tcsetpgrp(libc::STDIN_FILENO, getpid()); // FIXME: does not work when launched via cargo run
-        println!("My PID is {:?}", getpid());
-        println!("My PGID is {:?}", getpgid(None));
-        println!("Foreground process is {:?}", tcgetpgrp(libc::STDIN_FILENO));
+
+        setpgid(0, 0).unwrap();
+        tcsetpgrp(libc::STDIN_FILENO, getpid()).unwrap();
+
+        Shell { background_jobs: vec![], }
     }
 
-    fn run() {
+    fn run(&mut self) {
         println!("Rotten sh...");
 
         loop {
             print!("$ ");
-            std::io::stdout().flush();
+            std::io::stdout().flush().unwrap();
 
             let mut buffer = String::new();
-            io::stdin().read_line(&mut buffer);
+            io::stdin().read_line(&mut buffer).unwrap();
+
+            if buffer.trim() == "fg" {
+
+                if self.background_jobs.is_empty() {
+                    println!("fg: no current job");
+                    continue
+                }
+
+                self.background_jobs.pop().unwrap().fg().unwrap();
+                continue
+            }
 
             if buffer.trim() == "exit" {
                 break;
             }
 
-            if let Some(mut pipeline) = Pipeline::parse(&buffer) { // FIXME: Pipeline.run()?
-                pipeline.spawn();
-                if pipeline.background {
-                    pipeline.bg();
+            if let Some(mut job) = Pipeline::parse(&buffer) {
+                job.spawn().unwrap();
+
+                if job.background {
+                    job.bg();
+                    self.background_jobs.push(job);
                 }
                 else {
-                    pipeline.fg();
+                    job.fg().unwrap();
                 }
             }
         }
@@ -57,6 +72,5 @@ impl Shell {
 
 
 fn main() {
-    Shell::init();
-    Shell::run();
+    Shell::new().run();
 }
