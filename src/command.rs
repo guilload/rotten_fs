@@ -166,9 +166,12 @@ impl Command {
                 let mut args = vec![self.cprogram()?];
                 args.extend(self.cargs()?);
 
-                execvp(&args[0], &args)?;
+                if let Err(e) = execvp(&args[0], &args) {
+                    println!("{:?}", e.errno().desc()); // FIXME: write to stderr
+                    unsafe { libc::exit(0); }
+                }
 
-                Ok(0)
+                panic!();
             },
 
             ForkResult::Parent { child } => {
